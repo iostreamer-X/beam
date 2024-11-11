@@ -1,5 +1,5 @@
 <p align="center">
-	<img src="/demo.png"/>
+	<img src="/demo.png" width="200px"/>
 </p>
 
 # An experiment in streaming
