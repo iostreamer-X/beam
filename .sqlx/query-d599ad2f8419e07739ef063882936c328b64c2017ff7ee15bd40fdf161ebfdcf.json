@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "insert into playing(type, data) values ('music', $1) ON CONFLICT (type) DO UPDATE SET data = $1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Jsonb"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "d599ad2f8419e07739ef063882936c328b64c2017ff7ee15bd40fdf161ebfdcf"
+}

@@ -1,0 +1,15 @@
+[package]
+name = "currently-playing-uploader"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+tokio = { version = "1", features = ["full"] }
+core-foundation = "0.10.0"
+core-foundation-sys = "0.8.7"
+serde = {version = "1.0.214", features = ["derive"]}
+serde_json = "1.0.132"
+sqlx = { version = "0.7.4", features = ["tls-rustls", "runtime-tokio", "postgres", "macros", "uuid", "time", "json"] }
+dotenv = "0.15.0"
+url = "2.5.3"
+chrono = "0.4.38"
