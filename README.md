@@ -1,5 +1,7 @@
 <p align="center">
 	<img src="/demo.png" width="200px"/>
+</p>
+<p align="center">
 	<a href="https://iostreamer.me">Demo</a>
 </p>
 
