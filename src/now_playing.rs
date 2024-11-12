@@ -1,6 +1,6 @@
 use std::process::Command;
 
-pub fn get_artwork() -> Option<String> {
+pub fn get_artwork_string() -> Option<String> {
     parse_cli_optional("ArtworkData")
 }
 

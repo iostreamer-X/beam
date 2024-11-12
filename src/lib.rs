@@ -1,5 +1,6 @@
 use std::{ffi::c_void, fmt::Debug, time::Duration};
 
+use chrono::Utc;
 use core_foundation::{
     base::{FromVoid, TCFType},
     dictionary::{CFDictionaryGetValue, CFDictionaryRef},
@@ -85,14 +86,33 @@ impl GenericMedia {
 
 pub struct GenericMediaObservable;
 impl GenericMediaObservable {
-    pub async fn poll(tx: UnboundedSender<GenericMedia>) {
+    pub async fn poll(tx: UnboundedSender<MediaEvent>) {
+        let mut state: Option<(bool, String)> = None;
         loop {
             if let Some(event) = GenericMedia::from_cli() {
-                tx.send(event)
-                    .expect("Could not send genereic media event!");
+                if Self::get_if_state_changed(&state, &event) {
+                    state = Some((event.is_playing, event.get_id().clone()));
+                    let media_event = MediaEvent::Generic {
+                        media: event.clone(),
+                        emitted_at: Utc::now().timestamp_millis(),
+                    };
+                    tx.send(media_event)
+                        .expect("Could not send genereic media event!");
+                }
             };
             sleep(Duration::from_secs(2)).await;
         }
+    }
+
+    fn get_if_state_changed(state: &Option<(bool, String)>, event: &GenericMedia) -> bool {
+        if let Some(state) = state {
+            let playback_state_changed = state.0 != event.is_playing;
+            let media_changed = state.1.cmp(event.get_id()).is_ne();
+
+            return playback_state_changed || media_changed;
+        }
+
+        return true;
     }
 }
 
@@ -121,66 +141,112 @@ impl Media for GenericMedia {
 pub enum MediaEvent {
     Music {
         media: MusicMedia,
-        artwork: Option<String>,
         emitted_at: i64,
     },
     Generic {
         media: GenericMedia,
-        artwork: Option<String>,
         emitted_at: i64,
     },
+}
+
+impl MediaEvent {
+    pub fn get_id(&self) -> &String {
+        match self {
+            MediaEvent::Music {
+                media,
+                emitted_at: _,
+            } => media.get_id(),
+            MediaEvent::Generic {
+                media,
+                emitted_at: _,
+            } => media.get_id(),
+        }
+    }
+    pub fn get_is_playing(&self) -> bool {
+        match self {
+            MediaEvent::Music {
+                media,
+                emitted_at: _,
+            } => media.get_is_playing(),
+            MediaEvent::Generic {
+                media,
+                emitted_at: _,
+            } => media.get_is_playing(),
+        }
+    }
+    pub fn get_type(&self) -> &'static str {
+        match self {
+            MediaEvent::Music {
+                media: _,
+                emitted_at: _,
+            } => "music",
+            MediaEvent::Generic {
+                media: _,
+                emitted_at: _,
+            } => "generic",
+        }
+    }
+
+    pub fn get_emitted_at(&self) -> &i64 {
+        match self {
+            MediaEvent::Music {
+                media: _,
+                emitted_at,
+            } => emitted_at,
+            MediaEvent::Generic {
+                media: _,
+                emitted_at,
+            } => emitted_at,
+        }
+    }
+}
+
+#[derive(Debug, Default, Serialize)]
+pub struct Artwork(Option<String>);
+impl Artwork {
+    pub fn update(&mut self, data: Option<String>) {
+        self.0 = data;
+    }
+
+    pub fn get(&self) -> &Option<String> {
+        return &self.0;
+    }
+
+    pub fn is_present(&self) -> bool {
+        return self.0.is_some();
+    }
+}
+
+impl From<&Artwork> for Artwork {
+    fn from(value: &Artwork) -> Self {
+        Artwork(value.get().clone())
+    }
 }
 
 #[derive(Default)]
 pub struct ArtworkCache {
     pub id: String,
-    pub artwork: Option<String>,
+    pub artwork: Artwork,
 }
 
 impl ArtworkCache {
-    pub fn mut_read(&mut self, id: &String) -> &Option<String> {
-        if id.cmp(&self.id).is_eq() {
-            return &self.artwork;
+    pub fn mut_read(&mut self, id: &String) -> &Artwork {
+        if id.cmp(&self.id).is_ne() {
+            self.artwork.update(now_playing::get_artwork_string());
         }
-        self.artwork = now_playing::get_artwork();
+
         return &self.artwork;
-    }
-}
-
-pub struct GenericMediaStore {
-    event: Option<GenericMedia>,
-}
-
-impl GenericMediaStore {
-    pub fn new() -> Self {
-        Self {
-            event: GenericMedia::from_cli(),
-        }
-    }
-
-    pub fn update(&mut self, other_event: GenericMedia) -> &Option<GenericMedia> {
-        let playback_state_changed = self.event.as_ref().map_or_else(
-            || true,
-            |state| state.get_is_playing() != other_event.get_is_playing(),
-        );
-        let song_changed = self
-            .event
-            .as_ref()
-            .map_or_else(|| true, |state| state.get_id() != other_event.get_id());
-
-        if playback_state_changed || song_changed {
-            self.event.replace(other_event);
-            return &self.event;
-        }
-
-        return &None;
-    }
-
-    pub fn print_event(&self) {
-        println!("Generic Media Event{:?}", self.event)
     }
 }
 
 pub unsafe fn voidp_to_ref<'a, T>(p: *const c_void) -> &'a T {
     unsafe { &*(p as *const T) }
+}
+
+#[derive(Debug, Serialize)]
+pub struct MediaRecord {
+    #[serde(flatten)]
+    pub media_event: MediaEvent,
+    #[serde(flatten)]
+    pub artwork: Artwork,
 }
