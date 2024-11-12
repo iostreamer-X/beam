@@ -32,12 +32,13 @@ impl MusicMedia {
         let is_playing =
             Self::get_string_key_from_cf_dictionary(dictionary, "Player State").eq("Playing");
         let store_url = Self::get_string_key_from_cf_dictionary(dictionary, "Store URL");
-        let url = Url::parse(store_url.as_str()).expect("Could not parse music media store url!");
+        let url =
+            Url::parse(store_url.as_str()).expect("[error] Could not parse music media store url!");
         let song_identifier = url
             .query_pairs()
             .find(|(key, _)| key == "i")
             .map(|(_, value)| value)
-            .expect("Store url did not have song identifier!");
+            .expect("[error] Store url did not have song identifier!");
         let link = format!("https://music.apple.com/us/song/{}", song_identifier);
         Self {
             is_playing,
@@ -68,7 +69,7 @@ impl GenericMedia {
         let result = now_playing::parse_cli("PlaybackRate");
         result
             .parse::<u8>()
-            .expect("Unable to parse if currently playing")
+            .expect("[error] Unable to parse if currently playing")
             == 1
     }
     pub fn from_cli() -> Option<Self> {
@@ -97,7 +98,7 @@ impl GenericMediaObservable {
                         emitted_at: Utc::now().timestamp_millis(),
                     };
                     tx.send(media_event)
-                        .expect("Could not send genereic media event!");
+                        .expect("[error] Could not send genereic media event!");
                 }
             };
             sleep(Duration::from_secs(2)).await;
@@ -241,12 +242,4 @@ impl ArtworkCache {
 
 pub unsafe fn voidp_to_ref<'a, T>(p: *const c_void) -> &'a T {
     unsafe { &*(p as *const T) }
-}
-
-#[derive(Debug, Serialize)]
-pub struct MediaRecord {
-    #[serde(flatten)]
-    pub media_event: MediaEvent,
-    #[serde(flatten)]
-    pub artwork: Artwork,
 }
