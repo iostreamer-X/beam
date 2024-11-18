@@ -6,11 +6,12 @@ use core_foundation::{
     dictionary::{CFDictionaryGetValue, CFDictionaryRef},
     string::CFString,
 };
-use now_playing::{get_now_playing, parse_cli_raw};
+use now_playing::NowPlayingService;
 use serde::Serialize;
 use tokio::{sync::mpsc::UnboundedSender, time::sleep};
 use url::Url;
 
+pub mod artwork;
 pub mod now_playing;
 pub mod now_playing_raw_parser;
 
@@ -89,7 +90,8 @@ pub struct GenericMedia {
 
 impl GenericMedia {
     pub fn from_cli<'a>(output: &'a String) -> Option<Self> {
-        let now_playing = get_now_playing(output).expect("[error] Could not get data from cli!");
+        let now_playing = NowPlayingService::get_now_playing(output)
+            .expect("[error] Could not get data from cli!");
         if now_playing.is_music {
             None
         } else {
@@ -107,7 +109,7 @@ impl GenericMediaObservable {
     pub async fn poll(tx: UnboundedSender<MediaEvent>) {
         let mut state: Option<GenericMedia> = None;
         loop {
-            let cli_output = parse_cli_raw();
+            let cli_output = NowPlayingService::parse_cli_raw();
             if let Some(event) = GenericMedia::from_cli(&cli_output) {
                 if Self::get_if_state_changed(&state, &event) {
                     state = Some(event.clone());
@@ -135,9 +137,9 @@ impl GenericMediaObservable {
 
     fn get_override_event(previous_state: &Option<GenericMedia>) -> Option<GenericMedia> {
         if let Some(previous_state) = previous_state {
-            let cli_output = parse_cli_raw();
-            let now_playing =
-                get_now_playing(&cli_output).expect("[error] Could not get data from cli!");
+            let cli_output = NowPlayingService::parse_cli_raw();
+            let now_playing = NowPlayingService::get_now_playing(&cli_output)
+                .expect("[error] Could not get data from cli!");
             if previous_state.get_is_playing() && !now_playing.is_playing {
                 return Some(GenericMedia {
                     is_playing: false,
@@ -224,49 +226,6 @@ impl MediaEvent {
                 emitted_at,
             } => emitted_at,
         }
-    }
-}
-
-#[derive(Debug, Default, Serialize)]
-pub struct Artwork(Option<String>);
-impl Artwork {
-    pub fn update(&mut self, data: Option<String>) {
-        self.0 = data;
-    }
-
-    pub fn get(&self) -> &Option<String> {
-        return &self.0;
-    }
-
-    pub fn is_present(&self) -> bool {
-        return self.0.is_some();
-    }
-}
-
-impl From<&Artwork> for Artwork {
-    fn from(value: &Artwork) -> Self {
-        Artwork(value.get().clone())
-    }
-}
-
-#[derive(Default)]
-pub struct ArtworkCache {
-    pub id: String,
-    pub artwork: Artwork,
-}
-
-impl ArtworkCache {
-    pub fn mut_read(&mut self, id: &String) -> &Artwork {
-        if id.cmp(&self.id).is_ne() {
-            self.update_cache(id.clone(), now_playing::get_artwork_string());
-        }
-
-        return &self.artwork;
-    }
-
-    fn update_cache(&mut self, new_id: String, artwork_string: Option<String>) {
-        self.id = new_id;
-        self.artwork.update(artwork_string);
     }
 }
 
