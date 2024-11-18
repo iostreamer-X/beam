@@ -6,14 +6,37 @@ use core_foundation::{
     dictionary::{CFDictionaryGetValue, CFDictionaryRef},
     string::CFString,
 };
+use now_playing::{get_now_playing, parse_cli_raw};
 use serde::Serialize;
 use tokio::{sync::mpsc::UnboundedSender, time::sleep};
 use url::Url;
+
 pub mod now_playing;
+pub mod now_playing_raw_parser;
 
 pub trait Media: Serialize + Debug {
     fn get_id(&self) -> &String;
     fn get_is_playing(&self) -> bool;
+}
+
+impl Media for MusicMedia {
+    fn get_id(&self) -> &String {
+        &self.name
+    }
+
+    fn get_is_playing(&self) -> bool {
+        self.is_playing
+    }
+}
+
+impl Media for GenericMedia {
+    fn get_id(&self) -> &String {
+        &self.name
+    }
+
+    fn get_is_playing(&self) -> bool {
+        self.is_playing
+    }
 }
 
 #[derive(Debug, Serialize, Clone)]
@@ -23,7 +46,7 @@ pub struct MusicMedia {
     album: String,
     artist: String,
     name: String,
-    link: String,
+    link: Option<String>,
 }
 
 impl MusicMedia {
@@ -34,12 +57,12 @@ impl MusicMedia {
         let store_url = Self::get_string_key_from_cf_dictionary(dictionary, "Store URL");
         let url =
             Url::parse(store_url.as_str()).expect("[error] Could not parse music media store url!");
-        let song_identifier = url
+        let link = url
             .query_pairs()
             .find(|(key, _)| key == "i")
-            .map(|(_, value)| value)
-            .expect("[error] Store url did not have song identifier!");
-        let link = format!("https://music.apple.com/us/song/{}", song_identifier);
+            .map(|(_, song_identifier)| {
+                format!("https://music.apple.com/us/song/{}", song_identifier)
+            });
         Self {
             is_playing,
             genre: Self::get_string_key_from_cf_dictionary(dictionary, "Genre"),
@@ -65,22 +88,16 @@ pub struct GenericMedia {
 }
 
 impl GenericMedia {
-    fn parse_is_playing_from_cli() -> bool {
-        let result = now_playing::parse_cli("PlaybackRate");
-        result
-            .parse::<u8>()
-            .expect("[error] Unable to parse if currently playing")
-            == 1
-    }
-    pub fn from_cli() -> Option<Self> {
-        if !now_playing::is_music() {
-            Some(Self {
-                is_playing: Self::parse_is_playing_from_cli(),
-                artist: now_playing::parse_cli_optional("Artist"),
-                name: now_playing::parse_cli("Title"),
-            })
-        } else {
+    pub fn from_cli<'a>(output: &'a String) -> Option<Self> {
+        let now_playing = get_now_playing(output).expect("[error] Could not get data from cli!");
+        if now_playing.is_music {
             None
+        } else {
+            Some(Self {
+                is_playing: now_playing.is_playing,
+                artist: now_playing.artist.map(|v| v.to_string()),
+                name: now_playing.title.to_string(),
+            })
         }
     }
 }
@@ -88,13 +105,24 @@ impl GenericMedia {
 pub struct GenericMediaObservable;
 impl GenericMediaObservable {
     pub async fn poll(tx: UnboundedSender<MediaEvent>) {
-        let mut state: Option<(bool, String)> = None;
+        let mut state: Option<GenericMedia> = None;
         loop {
-            if let Some(event) = GenericMedia::from_cli() {
+            let cli_output = parse_cli_raw();
+            if let Some(event) = GenericMedia::from_cli(&cli_output) {
                 if Self::get_if_state_changed(&state, &event) {
-                    state = Some((event.is_playing, event.get_id().clone()));
+                    state = Some(event.clone());
                     let media_event = MediaEvent::Generic {
                         media: event.clone(),
+                        emitted_at: Utc::now().timestamp_millis(),
+                    };
+                    tx.send(media_event)
+                        .expect("[error] Could not send genereic media event!");
+                }
+            } else {
+                if let Some(override_event) = Self::get_override_event(&state) {
+                    state = Some(override_event.clone());
+                    let media_event = MediaEvent::Generic {
+                        media: override_event,
                         emitted_at: Utc::now().timestamp_millis(),
                     };
                     tx.send(media_event)
@@ -105,35 +133,32 @@ impl GenericMediaObservable {
         }
     }
 
-    fn get_if_state_changed(state: &Option<(bool, String)>, event: &GenericMedia) -> bool {
+    fn get_override_event(previous_state: &Option<GenericMedia>) -> Option<GenericMedia> {
+        if let Some(previous_state) = previous_state {
+            let cli_output = parse_cli_raw();
+            let now_playing =
+                get_now_playing(&cli_output).expect("[error] Could not get data from cli!");
+            if previous_state.get_is_playing() && !now_playing.is_playing {
+                return Some(GenericMedia {
+                    is_playing: false,
+                    ..previous_state.clone()
+                });
+            }
+            return None;
+        } else {
+            None
+        }
+    }
+
+    fn get_if_state_changed(state: &Option<GenericMedia>, event: &GenericMedia) -> bool {
         if let Some(state) = state {
-            let playback_state_changed = state.0 != event.is_playing;
-            let media_changed = state.1.cmp(event.get_id()).is_ne();
+            let playback_state_changed = state.is_playing != event.is_playing;
+            let media_changed = event.name.cmp(&state.name).is_ne();
 
             return playback_state_changed || media_changed;
         }
 
         return true;
-    }
-}
-
-impl Media for MusicMedia {
-    fn get_id(&self) -> &String {
-        &self.name
-    }
-
-    fn get_is_playing(&self) -> bool {
-        self.is_playing
-    }
-}
-
-impl Media for GenericMedia {
-    fn get_id(&self) -> &String {
-        &self.name
-    }
-
-    fn get_is_playing(&self) -> bool {
-        self.is_playing
     }
 }
 
@@ -156,11 +181,11 @@ impl MediaEvent {
             MediaEvent::Music {
                 media,
                 emitted_at: _,
-            } => media.get_id(),
+            } => &media.name,
             MediaEvent::Generic {
                 media,
                 emitted_at: _,
-            } => media.get_id(),
+            } => &media.name,
         }
     }
     pub fn get_is_playing(&self) -> bool {
@@ -168,11 +193,11 @@ impl MediaEvent {
             MediaEvent::Music {
                 media,
                 emitted_at: _,
-            } => media.get_is_playing(),
+            } => media.is_playing,
             MediaEvent::Generic {
                 media,
                 emitted_at: _,
-            } => media.get_is_playing(),
+            } => media.is_playing,
         }
     }
     pub fn get_type(&self) -> &'static str {
@@ -233,10 +258,15 @@ pub struct ArtworkCache {
 impl ArtworkCache {
     pub fn mut_read(&mut self, id: &String) -> &Artwork {
         if id.cmp(&self.id).is_ne() {
-            self.artwork.update(now_playing::get_artwork_string());
+            self.update_cache(id.clone(), now_playing::get_artwork_string());
         }
 
         return &self.artwork;
+    }
+
+    fn update_cache(&mut self, new_id: String, artwork_string: Option<String>) {
+        self.id = new_id;
+        self.artwork.update(artwork_string);
     }
 }
 

@@ -1,23 +1,26 @@
-use std::process::Command;
+use crate::now_playing_raw_parser::{self, ParsingError};
+use std::{collections::HashMap, process::Command};
 
-pub fn get_artwork_string() -> Option<String> {
-    parse_cli_optional("ArtworkData")
+const PLAYBACK_RATE: &str = "kMRMediaRemoteNowPlayingInfoPlaybackRate";
+const TITLE: &str = "kMRMediaRemoteNowPlayingInfoTitle";
+const ARTIST: &str = "kMRMediaRemoteNowPlayingInfoArtist";
+const MEDIA_TYPE: &str = "kMRMediaRemoteNowPlayingInfoMediaType";
+
+#[derive(Debug)]
+pub struct NowPlaying<'a> {
+    pub is_music: bool,
+    pub is_playing: bool,
+    pub title: &'a str,
+    pub artist: Option<&'a str>,
 }
 
-pub fn get_song_identifier() -> String {
-    parse_cli("ContentItemIdentifier")
+fn get_hashmap(output: &String) -> Result<HashMap<&str, &str>, ParsingError> {
+    now_playing_raw_parser::parse_raw(&output)
 }
 
-pub fn is_music() -> bool {
-    parse_cli_optional("MediaType").map_or_else(
-        || false,
-        |media_type| media_type == "MRMediaRemoteMediaTypeMusic",
-    )
-}
-
-pub fn parse_cli(arg: &str) -> String {
+pub fn parse_cli_raw() -> String {
     let output = Command::new("nowplaying-cli")
-        .args(["get", arg])
+        .args(["get-raw"])
         .output()
         .expect("failed to execute process");
 
@@ -27,7 +30,35 @@ pub fn parse_cli(arg: &str) -> String {
         .to_string()
 }
 
-pub fn parse_cli_optional(arg: &str) -> Option<String> {
+pub fn get_now_playing<'a>(output: &'a String) -> Result<NowPlaying<'a>, ParsingError> {
+    let hashmap = get_hashmap(output)?;
+    let is_music = hashmap
+        .get(MEDIA_TYPE)
+        .map_or(false, |value| *value == "MRMediaRemoteMediaTypeMusic");
+    let is_playing = hashmap.get(PLAYBACK_RATE).map_or(false, |value| {
+        value
+            .parse::<u8>()
+            .expect("[error] Unable to parse if currently playing")
+            == 1
+    });
+    let title = hashmap
+        .get(TITLE)
+        .expect("[error] Unable to parse media title from cli");
+    let artist = hashmap.get(ARTIST).map(|v| *v);
+
+    Ok(NowPlaying {
+        is_music,
+        is_playing,
+        title,
+        artist,
+    })
+}
+
+pub fn get_artwork_string() -> Option<String> {
+    parse_cli_optional("ArtworkData")
+}
+
+fn parse_cli_optional(arg: &str) -> Option<String> {
     let output = Command::new("nowplaying-cli")
         .args(["get", arg])
         .output()
@@ -47,17 +78,11 @@ pub fn parse_cli_optional(arg: &str) -> Option<String> {
 
 #[cfg(test)]
 mod tests {
-    use crate::now_playing::parse_cli;
+    use super::{get_now_playing, parse_cli_raw};
 
     #[test]
-    fn parse_song_identifier() {
-        let result = parse_cli("ContentItemIdentifier");
-        assert!(result.len() > 4);
-    }
-
-    #[test]
-    fn parse_album_identifier() {
-        let result = parse_cli("AlbumiTunesStoreAdamIdentifier");
-        assert!(result.len() > 4);
+    fn test_get_now_playing() {
+        let cli_output = parse_cli_raw();
+        get_now_playing(&cli_output).expect("Could not parse cli output");
     }
 }

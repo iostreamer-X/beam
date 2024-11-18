@@ -11,8 +11,8 @@ use core_foundation_sys::notification_center::{
     CFNotificationSuspensionBehaviorDeliverImmediately,
 };
 use currently_playing_uploader::{
-    now_playing, voidp_to_ref, Artwork, ArtworkCache, GenericMediaObservable, Media, MediaEvent,
-    MusicMedia,
+    now_playing::{get_now_playing, parse_cli_raw},
+    voidp_to_ref, Artwork, ArtworkCache, GenericMediaObservable, Media, MediaEvent, MusicMedia,
 };
 use serde_json::json;
 use sqlx::{postgres::PgPoolOptions, Pool, Postgres};
@@ -41,11 +41,16 @@ async fn db() -> &'static Pool<Postgres> {
 async fn main() {
     dotenv().ok();
 
-    let aw_cache = ArtworkCache::default();
+    let generic_media_aw_cache = ArtworkCache::default();
+    let music_media_aw_cache = ArtworkCache::default();
 
     let (tx, rx) = tokio::sync::mpsc::unbounded_channel::<MediaEvent>();
 
-    tokio::spawn(subscribe_to_media_events(rx, aw_cache));
+    tokio::spawn(subscribe_to_media_events(
+        rx,
+        generic_media_aw_cache,
+        music_media_aw_cache,
+    ));
 
     //Starting polling for local events
     tokio::spawn(GenericMediaObservable::poll(tx.clone()));
@@ -76,7 +81,10 @@ extern "C" fn music_event_handler(
     unsafe {
         let event = MusicMedia::from_cf_dictionary(user_info);
         let tx_ref: &UnboundedSender<MediaEvent> = voidp_to_ref(tx_pointer);
-        if !now_playing::is_music() {
+        let cli_output = parse_cli_raw();
+        let now_playing =
+            get_now_playing(&cli_output).expect("[error] Could not get data from cli!");
+        if !now_playing.is_music {
             return;
         }
         let media_event = MediaEvent::Music {
@@ -91,7 +99,8 @@ extern "C" fn music_event_handler(
 
 async fn subscribe_to_media_events(
     mut rx: UnboundedReceiver<MediaEvent>,
-    mut aw_cache: ArtworkCache,
+    mut generic_media_aw_cache: ArtworkCache,
+    mut music_media_aw_cache: ArtworkCache,
 ) {
     let db = db().await;
     while let Some(event) = rx.recv().await {
@@ -99,7 +108,7 @@ async fn subscribe_to_media_events(
             MediaEvent::Generic {
                 media,
                 emitted_at: _,
-            } => Ok(aw_cache.mut_read(media.get_id())),
+            } => Ok(generic_media_aw_cache.mut_read(media.get_id())),
             MediaEvent::Music {
                 media,
                 emitted_at: _,
@@ -108,11 +117,14 @@ async fn subscribe_to_media_events(
             // So we loop over till we get it. We do it only if music is being played.
             {
                 loop {
-                    let artwork = aw_cache.mut_read(media.get_id());
+                    let artwork = music_media_aw_cache.mut_read(media.get_id());
                     if artwork.is_present() {
                         break Ok(artwork);
                     }
-                    if !now_playing::is_music() {
+                    let cli_output = parse_cli_raw();
+                    let now_playing =
+                        get_now_playing(&cli_output).expect("[error] Could not get data from cli!");
+                    if !now_playing.is_music {
                         break Err("Can not force artwork retrieval if music is not playing!");
                     }
                 }
