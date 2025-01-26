@@ -4,9 +4,8 @@ use dotenv::dotenv;
 use std::{ffi::c_void, ptr};
 
 use beam::{
-    artwork::{Artwork, ArtworkCache},
-    now_playing::NowPlayingService,
-    voidp_to_ref, GenericMediaObservable, Media, MediaEvent, MusicMedia,
+    artwork::ArtworkCache, now_playing::NowPlayingService, voidp_to_ref, GenericMediaObservable,
+    Media, MediaEvent, MusicMedia,
 };
 use core_foundation::{
     base::TCFType, dictionary::CFDictionaryRef, runloop::CFRunLoopRun, string::CFString,
@@ -58,11 +57,9 @@ extern "C" fn music_event_handler(
             media: event.clone(),
             emitted_at: Utc::now().timestamp_millis(),
         };
-        println!("sending event {:?}", event);
         if let Err(e) = tx_ref.send(media_event) {
-            println!("[error] Sending failed to channel! {}", e)
+            println!("{} Sending failed to channel! {}", "[error]".red(), e)
         }
-        println!("successfully sent {:?}", event);
     }
 }
 
@@ -74,7 +71,6 @@ async fn subscribe_to_media_events(
     let db = db().await;
     println!("{} Database connection initialized", "[log]".blue());
     while let Some(event) = rx.recv().await {
-        println!("attempting syncing {:?}", event);
         let artwork_result = match &event {
             MediaEvent::Generic {
                 media,
