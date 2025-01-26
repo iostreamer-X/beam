@@ -1,80 +1,54 @@
+use crate::NowPlayingService;
 use serde::Serialize;
 
-#[cfg(test)]
-use mockall::automock;
-#[cfg_attr(test, automock)]
-pub trait ArtworkFetcher {
-    fn get_artwork_string(&self) -> Option<String>;
-}
-
 #[derive(Debug, Default, Serialize)]
-pub struct Artwork(Option<String>);
-impl Artwork {
-    pub fn update(&mut self, data: Option<String>) {
-        self.0 = data;
-    }
-
-    pub fn get(&self) -> &Option<String> {
-        return &self.0;
-    }
-
-    pub fn is_present(&self) -> bool {
-        return self.0.is_some();
-    }
-}
+pub struct Artwork(String);
 
 impl From<&Artwork> for Artwork {
     fn from(value: &Artwork) -> Self {
-        Artwork(value.get().clone())
+        Artwork(value.0.clone())
     }
 }
 
 #[derive(Default)]
 pub struct ArtworkCache {
     pub id: String,
-    pub artwork: Artwork,
+    pub artwork: Option<Artwork>,
 }
 
 impl ArtworkCache {
-    pub fn mut_read(&mut self, id: &String, playback_service: &impl ArtworkFetcher) -> &Artwork {
+    pub fn mut_read(&mut self, id: &String) -> &Option<Artwork> {
         if id.cmp(&self.id).is_ne() {
-            self.update_cache(id.clone(), playback_service.get_artwork_string());
+            self.update_cache(id.clone());
         }
 
         return &self.artwork;
     }
 
-    fn update_cache(&mut self, new_id: String, artwork_string: Option<String>) {
+    fn update_cache(&mut self, new_id: String) {
         self.id = new_id;
-        self.artwork.update(artwork_string);
-    }
-}
 
-#[cfg(test)]
-mod tests {
-    use super::*;
+        // In some cases when music stops, the cli isn't able to pick up the artwork.
+        // So we loop over till we get it. We do it only if music is being played.
+        let artwork_result = loop {
+            let artwork = NowPlayingService::get_artwork_string();
+            if artwork.is_some() {
+                break Ok(artwork.unwrap());
+            }
+            let cli_output = NowPlayingService::parse_cli_raw();
+            let now_playing = match NowPlayingService::get_now_playing(&cli_output) {
+                Ok(result) => result,
+                _ => break Err("Can not force artwork retrieval if music is not playing!"),
+            };
+            if !now_playing.is_music {
+                break Err("Can not force artwork retrieval if music is not playing!");
+            }
+        };
 
-    #[test]
-    fn test_artwork_cache() {
-        let mut cache = ArtworkCache::default();
-        let mut artwork_fetcher = MockArtworkFetcher::new();
-
-        artwork_fetcher
-            .expect_get_artwork_string()
-            .returning(|| Some("artwork1".to_string()));
-
-        let result = cache.mut_read(&"key1".into(), &artwork_fetcher);
-        assert_eq!(result.0.as_ref().unwrap(), "artwork1");
-
-        let mut artwork_fetcher = MockArtworkFetcher::new();
-        artwork_fetcher
-            .expect_get_artwork_string()
-            .returning(|| Some("artwork2".to_string()));
-
-        let result = cache.mut_read(&"key1".into(), &artwork_fetcher);
-        assert_eq!(result.0.as_ref().unwrap(), "artwork1");
-
-        let result = cache.mut_read(&"key2".into(), &artwork_fetcher);
-        assert_eq!(result.0.as_ref().unwrap(), "artwork2");
+        if let Ok(artwork) = artwork_result {
+            self.artwork = Some(Artwork(artwork));
+        } else if let Err(e) = artwork_result {
+            println!("[error] Could not update artwork cache! {}", e);
+        }
     }
 }

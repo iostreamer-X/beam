@@ -88,10 +88,16 @@ pub struct GenericMedia {
     name: String,
 }
 
+// While MusicMedia is event driven, GenericMedia is polled from CLI.
+// The CLI captures every other media being played on the machine, including MusicMedia(iTunes/Music app).
+// This means GenericMedia filters on the basis of it being MusicMedia or not, so as to not send a repeat event.
 impl GenericMedia {
     pub fn from_cli<'a>(output: &'a String) -> Option<Self> {
-        let now_playing = NowPlayingService::get_now_playing(output)
-            .expect("[error] Could not get data from cli!");
+        let now_playing = match NowPlayingService::get_now_playing(output) {
+            Ok(result) => result,
+            _ => return None,
+        };
+
         if now_playing.is_music {
             None
         } else {
@@ -121,6 +127,11 @@ impl GenericMediaObservable {
                         .expect("[error] Could not send genereic media event!");
                 }
             } else {
+                // In case where before playing GenericMedia(youtube on browser), MusicMedia(iTunes/Music app) was being played,
+                // and then we pause the GenericMedia, the CLI falls back to MusicMedia.
+                // And as you might recall, GenericMedia can not be constructed if CLI tells MusicMedia is/was being played.
+                // This leads to a behaviour where no 'Pause' or 'Stopped' event is fired for GenericMedia.
+                // In the following block, we are emulating that behaviour.
                 if let Some(override_event) = Self::get_override_event(&state) {
                     state = Some(override_event.clone());
                     let media_event = MediaEvent::Generic {
@@ -138,9 +149,11 @@ impl GenericMediaObservable {
     fn get_override_event(previous_state: &Option<GenericMedia>) -> Option<GenericMedia> {
         if let Some(previous_state) = previous_state {
             let cli_output = NowPlayingService::parse_cli_raw();
-            let now_playing = NowPlayingService::get_now_playing(&cli_output)
-                .expect("[error] Could not get data from cli!");
-            if previous_state.get_is_playing() && !now_playing.is_playing {
+            let is_playing = match NowPlayingService::get_now_playing(&cli_output) {
+                Ok(result) => result.is_playing,
+                _ => false,
+            };
+            if previous_state.get_is_playing() && !is_playing {
                 return Some(GenericMedia {
                     is_playing: false,
                     ..previous_state.clone()

@@ -1,7 +1,4 @@
-use crate::{
-    artwork::ArtworkFetcher,
-    now_playing_raw_parser::{self, ParsingError},
-};
+use crate::now_playing_raw_parser::{self, ParsingError};
 use std::{collections::HashMap, process::Command};
 
 const PLAYBACK_RATE: &str = "kMRMediaRemoteNowPlayingInfoPlaybackRate";
@@ -20,13 +17,11 @@ pub struct NowPlaying<'a> {
 #[derive(Default)]
 pub struct NowPlayingService;
 
-impl ArtworkFetcher for NowPlayingService {
-    fn get_artwork_string(&self) -> Option<String> {
+impl NowPlayingService {
+    pub fn get_artwork_string() -> Option<String> {
         Self::parse_cli_optional("ArtworkData")
     }
-}
 
-impl NowPlayingService {
     pub fn get_now_playing<'a>(output: &'a String) -> Result<NowPlaying<'a>, ParsingError> {
         let hashmap = Self::get_hashmap(output)?;
         let is_music = hashmap
