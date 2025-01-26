@@ -1,4 +1,5 @@
 use crate::NowPlayingService;
+use colored::Colorize;
 use serde::Serialize;
 
 #[derive(Debug, Default, Serialize)]
@@ -48,7 +49,7 @@ impl ArtworkCache {
         if let Ok(artwork) = artwork_result {
             self.artwork = Some(Artwork(artwork));
         } else if let Err(e) = artwork_result {
-            println!("[error] Could not update artwork cache! {}", e);
+            println!("{} Could not update artwork cache! {}", "[error]".red(), e);
         }
     }
 }
