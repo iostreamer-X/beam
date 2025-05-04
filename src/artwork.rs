@@ -1,9 +1,40 @@
-use crate::NowPlayingService;
-use colored::Colorize;
+use anyhow::{anyhow, Result};
+use base64::{engine::general_purpose, Engine};
+use image::ImageReader;
+use std::{io::Cursor, process::Command};
+
 use serde::Serialize;
 
-#[derive(Debug, Default, Serialize)]
+const ARTWORK_PATH: &'static str = "/tmp/current_artwork.jpg";
+
+#[derive(Debug, Default, Serialize, Clone)]
 pub struct Artwork(String);
+
+impl Artwork {
+    pub fn try_init() -> Result<Artwork> {
+        let result = Command::new("osascript")
+            .arg("-e")
+            .arg(get_script())
+            .output()?;
+        let result_string = String::from_utf8(result.stdout)?;
+        let result = result_string.trim().parse::<i8>()?;
+        if result == -1 {
+            return Err(anyhow!("Could not fetch artwork from script!"));
+        }
+
+        let image = ImageReader::open(ARTWORK_PATH)?.decode()?;
+        let mut image_data: Vec<u8> = Vec::new();
+        image
+            .write_to(&mut Cursor::new(&mut image_data), image::ImageFormat::Jpeg)
+            .unwrap();
+        let res_base64 = general_purpose::STANDARD.encode(image_data);
+        Result::Ok(Artwork(res_base64))
+    }
+
+    pub fn get_string(&self) -> String {
+        self.0.clone()
+    }
+}
 
 impl From<&Artwork> for Artwork {
     fn from(value: &Artwork) -> Self {
@@ -11,45 +42,42 @@ impl From<&Artwork> for Artwork {
     }
 }
 
-#[derive(Default)]
-pub struct ArtworkCache {
-    pub id: String,
-    pub artwork: Option<Artwork>,
+fn get_script() -> String {
+    return format!(
+        "
+        set filePath to \"{}\"
+        tell application \"Music\"
+			if player state is playing then
+				set theTrack to current track
+				try
+					set artData to data of artwork 1 of theTrack
+					set outFile to open for access (POSIX file filePath) with write permission
+					set eof of outFile to 0 -- clear existing contents
+					write artData to outFile
+					close access outFile
+					return 0
+				on error errMsg
+					try
+						close access outFile
+					end try
+					return -1
+				end try
+			else
+				return -1
+			end if
+		end tell
+		",
+        ARTWORK_PATH
+    );
 }
 
-impl ArtworkCache {
-    pub fn mut_read(&mut self, id: &String) -> &Option<Artwork> {
-        if id.cmp(&self.id).is_ne() {
-            self.update_cache(id.clone());
-        }
+#[cfg(test)]
+mod tests {
+    use super::*;
 
-        return &self.artwork;
-    }
-
-    fn update_cache(&mut self, new_id: String) {
-        self.id = new_id;
-
-        // In some cases when music stops, the cli isn't able to pick up the artwork.
-        // So we loop over till we get it. We do it only if music is being played.
-        let artwork_result = loop {
-            let artwork = NowPlayingService::get_artwork_string();
-            if artwork.is_some() {
-                break Ok(artwork.unwrap());
-            }
-            let cli_output = NowPlayingService::parse_cli_raw();
-            let now_playing = match NowPlayingService::get_now_playing(&cli_output) {
-                Ok(result) => result,
-                _ => break Err("Can not force artwork retrieval if music is not playing!"),
-            };
-            if !now_playing.is_music {
-                break Err("Can not force artwork retrieval if music is not playing!");
-            }
-        };
-
-        if let Ok(artwork) = artwork_result {
-            self.artwork = Some(Artwork(artwork));
-        } else if let Err(e) = artwork_result {
-            println!("{} Could not update artwork cache! {}", "[error]".red(), e);
-        }
+    #[test]
+    fn get_base64_image() {
+        let result = Artwork::try_init().expect("Could not get Image!");
+        println!("{:?}", result);
     }
 }
