@@ -25,7 +25,7 @@ extern "C" fn music_event_handler(
         let event = MusicMedia::from_cf_dictionary(system_event);
         let tx_ref: &UnboundedSender<MediaEvent> = voidp_to_ref(tx_pointer);
         let media_event = MediaEvent::Music {
-            media: event.clone(),
+            media: event,
             emitted_at: Utc::now().timestamp_millis(),
         };
         if let Err(e) = tx_ref.send(media_event) {

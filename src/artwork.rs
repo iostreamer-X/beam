@@ -7,7 +7,7 @@ use serde::Serialize;
 
 const ARTWORK_PATH: &'static str = "/tmp/current_artwork.jpg";
 
-#[derive(Debug, Default, Serialize, Clone)]
+#[derive(Debug, Default, Serialize)]
 pub struct Artwork(String);
 
 impl Artwork {
@@ -33,12 +33,6 @@ impl Artwork {
 
     pub fn get_string(&self) -> String {
         self.0.clone()
-    }
-}
-
-impl From<&Artwork> for Artwork {
-    fn from(value: &Artwork) -> Self {
-        Artwork(value.0.clone())
     }
 }
 
