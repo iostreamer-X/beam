@@ -21,7 +21,7 @@ extern "C" fn music_event_handler(
     _: *const c_void,
     system_event: CFDictionaryRef,
 ) {
-    unsafe {
+    let result = std::panic::catch_unwind(|| unsafe {
         let event = MusicMedia::from_cf_dictionary(system_event);
         let tx_ref: &UnboundedSender<MediaEvent> = voidp_to_ref(tx_pointer);
         let media_event = MediaEvent::Music {
@@ -31,6 +31,10 @@ extern "C" fn music_event_handler(
         if let Err(e) = tx_ref.send(media_event) {
             println!("{} Sending failed to channel! {}", "[error]".red(), e)
         }
+    });
+
+    if result.is_err() {
+        println!("{} Music handler panicked!", "[error]".red())
     }
 }
 
