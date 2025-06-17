@@ -35,12 +35,7 @@ async fn media_event_handler(
     if did_media_change {
         artwork_cache.clear();
     }
-    let artwork = match &event {
-        MediaEvent::Music {
-            media: _,
-            emitted_at: _,
-        } => artwork_cache.get()?,
-    };
+    let artwork = artwork_cache.get()?;
 
     let mut raw_event = json!(event);
     let raw_event = raw_event.as_object_mut().unwrap();
